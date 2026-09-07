@@ -203,7 +203,8 @@ async function getAIPrediction(
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is missing. AI prediction cannot be generated.');
+    console.log('No GEMINI_API_KEY. Using mathematical fallback prediction.');
+    return { ...mathPredict, isAIPowered: false };
   }
 
   try {
@@ -358,9 +359,9 @@ ${recordsText}
       },
       isAIPowered: true,
     };
-  } catch (err: any) {
-    console.error('Gemini prediction generation failed:', err);
-    throw new Error('AI prediction generation failed: ' + err.message);
+  } catch (err) {
+    console.error('Gemini prediction generation failed, gracefully falling back to math model:', err);
+    return { ...mathPredict, isAIPowered: false };
   }
 }
 
@@ -443,8 +444,12 @@ app.post('/api/ai-report', async (req, res) => {
     const { prediction, summary, latestDraw } = req.body;
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: 'GEMINI_API_KEY is missing. Please configure your API key to generate reports.'
+      return res.status(200).json({
+        content: `### ⚠️ API连接异常
+
+服务器端未检测到有效的 \`GEMINI_API_KEY\` 密钥，无法连接至 AI 引擎。
+
+*(提示：请检查环境变量配置，确保系统能正常访问 Gemini 接口。)*`,
       });
     }
 
@@ -495,7 +500,16 @@ app.post('/api/ai-report', async (req, res) => {
     res.json({ content: response.text });
   } catch (err: any) {
     console.error('Gemini API call failed:', err);
-    res.status(500).json({ error: 'Gemini reports error: ' + err.message });
+    res.status(200).json({
+      content: `### ⚠️ API连接异常
+
+当前网络请求超时或所有 AI 接口连接失败。
+
+**错误信息:**
+\`${err.message}\`
+
+*(提示：请检查服务器网络状态或重试请求。)*`
+    });
   }
 });
 
