@@ -1,4 +1,5 @@
 // server.ts
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -8,6 +9,32 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 const app = express();
 const PORT = 3000;
+
+async function generateContentWithRetry(ai: any, request: any, maxRetriesPerModel = 2) {
+  const models = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+  
+  for (const model of models) {
+    for (let i = 0; i < maxRetriesPerModel; i++) {
+      try {
+        const requestWithModel = { ...request, model };
+        return await ai.models.generateContent(requestWithModel);
+      } catch (err: any) {
+        const isUnavailable = err.status === 503 || err.status === 'UNAVAILABLE' || (err.message && err.message.includes('503'));
+        
+        // If we exhausted retries for this model OR it's a non-503 error, break to next model
+        if (i === maxRetriesPerModel - 1 || !isUnavailable) {
+          console.warn(`Model ${model} failed (${err.message}). ${models.indexOf(model) < models.length - 1 ? 'Falling back to next model...' : ''}`);
+          break; // Exit inner retry loop, proceed to next model in outer loop
+        }
+        
+        console.warn(`Gemini API busy (503) for ${model}. Retrying in ${Math.pow(2, i + 1)}s...`);
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+      }
+    }
+  }
+  
+  throw new Error(`All Gemini models (${models.join(', ')}) failed.`);
+}
 
 // Prediction cache to avoid excessive API requests
 const cacheFilePath = path.resolve('src/data/prediction_cache.json');
@@ -123,7 +150,7 @@ async function scrapeLatest(): Promise<{ success: boolean; count: number; messag
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      // Format: "2026165: [11,47,09,49,02,01,03]" or similar
+      // Format: "202649: [11,47,09,49,02,01,03]" or similar
       const match = trimmed.match(/^(\d+):\s*\[(.*?)\]/);
       if (match) {
         const period = match[1];
@@ -176,8 +203,7 @@ async function getAIPrediction(
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!process.env.GEMINI_API_KEY) {
-    console.log('No GEMINI_API_KEY. Using mathematical fallback prediction.');
-    return { ...mathPredict, isAIPowered: false };
+    throw new Error('GEMINI_API_KEY is missing. AI prediction cannot be generated.');
   }
 
   try {
@@ -190,9 +216,9 @@ async function getAIPrediction(
       },
     });
 
-    // Provide the 165 lottery periods as statistical text context
+    // Provide the 49 lottery periods as statistical text context
     const recordsText = rawRecords
-      .slice(0, 165)
+      .slice(0, 49)
       .map((r) => `${r.period}: [${r.numbers.join(',')}]`)
       .join('\n');
 
@@ -215,7 +241,7 @@ async function getAIPrediction(
     }
 
     const prompt = `您是一位高等概率论专家和赛马彩票混沌学学者。
-现在我们将向您提供澳门赛马会最近的 165 期开奖历史数据。每一期包含 7 个开奖号码（范围从 01 到 49）。
+现在我们将向您提供澳门赛马会最近的 49 期开奖历史数据。每一期包含 7 个开奖号码（范围从 01 到 49）。
 ${feedbackContext}
 
 【重要分析理论与对冲规则】：
@@ -231,7 +257,7 @@ ${feedbackContext}
    - 您应该评估 49 码的总体出现频次、近期遗漏周期，并结合混沌理论推演下一期（第 ${parseInt(latestDraw.period, 10) + 1} 期）最不可能出现的 6 个号码。
    - 重点考虑长期极度冷态、出现频次极低、或者近期遗漏处于极值不符合反弹走势的号码。
 
-以下是前面165期开奖数据（最新期在最上面）：
+以下是前面49期开奖数据（最新期在最上面）：
 ${recordsText}
 
 请在进行高精度数理逻辑推演后，计算出下一期最不可能出现的6个号码（范围为 1 到 49，必须是 6 个互不相同的整数，按升序排列）。
@@ -242,13 +268,13 @@ ${recordsText}
   "reasoning": {
     "triggerLocking": "根据隔期特征，讨论排除名单中对当前活跃追踪目标号 [${activeNumbers.join(', ')}] 执行的安全加锁与防回弹屏障过程，使用极具专业度的中文描绘",
     "edgeDeduction": "详细阐释首尾边缘环形运算下对高回补落点的绕道对冲策略（如果上期失败，需阐述本次的修正方案），使用极具专业度的中文描绘",
-    "omissionConclusion": "结合165期大盘冷态指标及遗漏波峰，全面推导论述此 6 个号码不可能出现的必然逻辑，使用极具专业度的中文描绘"
+    "omissionConclusion": "结合49期大盘冷态指标及遗漏波峰，全面推导论述此 6 个号码不可能出现的必然逻辑，使用极具专业度的中文描绘"
   }
 }`;
 
     console.log('Requesting Gemini AI prediction...');
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateContentWithRetry(ai, {
+      model: 'gemini-3.6-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -332,9 +358,9 @@ ${recordsText}
       },
       isAIPowered: true,
     };
-  } catch (err) {
-    console.error('Gemini prediction generation failed, gracefully falling back to math model:', err);
-    return { ...mathPredict, isAIPowered: false };
+  } catch (err: any) {
+    console.error('Gemini prediction generation failed:', err);
+    throw new Error('AI prediction generation failed: ' + err.message);
   }
 }
 
@@ -417,23 +443,8 @@ app.post('/api/ai-report', async (req, res) => {
     const { prediction, summary, latestDraw } = req.body;
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(200).json({
-        content: `### 🤖 AI辅助分析报告 (Gemini API 离线状态)
-
-本系统正处于运行状态，由于服务器端未检测到 \`GEMINI_API_KEY\` 密钥，系统已自动转入【高精度数理逻辑引擎】本地运行。
-
-#### 📊 当前期开奖对冲
-- **最新期数**：${latestDraw?.period || '未加载'}
-- **开奖号**：[${(latestDraw?.numbers || []).join(', ')}]
-- **排除建议**：[${(prediction?.predictedNumbers || []).map((n: number) => n.toString().padStart(2, '0')).join(', ')}]
-
-#### 💡 算法执行指标
-- **隔期同号触发点总数**：${summary?.totalTriggers || 0} 次
-- **基准位轨迹命中总数**：${summary?.totalHits || 0} 次
-- **追逐补位高发效率 (1-4期)**：${summary?.hitRate1To4 ? (summary.hitRate1To4 * 100).toFixed(1) : '100'}%
-- **专家排除算法准确度 (6码完全排除)**：${summary?.exclusionSuccessRate ? (summary.exclusionSuccessRate * 100).toFixed(1) : '85'}%
-
-*(提示：若要激活深度AI演译和高级趋势报告，请至 AI Studio 的 Secrets 管理区配置有效的 GEMINI_API_KEY 后，即可享受全自动的数学+AI混合预测报告！)*`,
+      return res.status(500).json({
+        error: 'GEMINI_API_KEY is missing. Please configure your API key to generate reports.'
       });
     }
 
@@ -455,7 +466,7 @@ app.post('/api/ai-report', async (req, res) => {
 当前期数数据:
 - 最新开奖期: ${latestDraw?.period || '最新'}
 - 最新开奖号: [${(latestDraw?.numbers || []).join(', ')}]
-- 当前回测大盘数据总样本: ${summary?.totalDraws || 165} 期
+- 当前回测大盘数据总样本: ${summary?.totalDraws || 49} 期
 - 轨迹触发器总触发事件: ${summary?.totalTriggers || 0} 次
 - 基准位P极速回补轨迹总命中: ${summary?.totalHits || 0} 次
 - 1-4期快速补位命中占比: ${summary?.hitRate1To4 ? (summary.hitRate1To4 * 100).toFixed(1) : '100'}%
@@ -476,8 +487,8 @@ app.post('/api/ai-report', async (req, res) => {
 
 字数要求在800字左右，语气要理性、冷静、充满高净值学者风范。必须使用 Markdown 格式输出，文字排版优雅精美。不要使用废话，直奔主题。`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateContentWithRetry(ai, {
+      model: 'gemini-3.6-flash',
       contents: prompt,
     });
 

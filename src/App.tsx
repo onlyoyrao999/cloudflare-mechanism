@@ -176,7 +176,7 @@ export default function App() {
               <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">Expert V1.2</span>
             </div>
             <p className="text-xs text-slate-400">
-              使用 Gemini 3.5 混沌概率引擎，深度学习与自适应纠偏机制。
+              使用 Gemini 3.6 Flash 混沌概率引擎，深度学习与自适应纠偏机制。
             </p>
           </div>
 
@@ -380,7 +380,7 @@ export default function App() {
                   {prediction.isAIPowered ? (
                     <span className="text-[10.5px] bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shadow-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                      Gemini 3.5 智能预测
+                      Gemini 3.6 Flash 智能预测
                     </span>
                   ) : (
                     <span className="text-[10.5px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium">
@@ -611,7 +611,7 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-6 mt-16 text-center text-xs text-slate-500 font-mono px-4">
         <div className="max-w-7xl mx-auto space-y-2">
           <p>
-            MacauJC 赛马轨迹分析客户端. 所有深度推导逻辑由 Gemini 3.5 人工智能大模型强力驱动，回测轨迹归档于 KV 边缘网络。
+            MacauJC 赛马轨迹分析客户端. 所有深度推导逻辑由 Gemini 3.6 Flash 人工智能大模型强力驱动，回测轨迹归档于 KV 边缘网络。
           </p>
           <p className="text-[10px] text-slate-650">
             © 2026 混沌数理概率研究组。本系统仅用作学术算法之研究及概率模型回测，不包含任何商业性推广行为。
