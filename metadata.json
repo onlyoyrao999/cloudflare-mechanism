@@ -1,0 +1,8 @@
+{
+  "name": "Remix MacauJC Lottery Analyzer",
+  "description": "澳门赛马会数据追踪与排除预测工具，自动抓取21:35最新数据，通过基准位环形算法进行走势回测和6个号码的排除推演。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "SavedPrediction": {
+      "title": "SavedPrediction",
+      "description": "A prediction record saved by a user with custom annotation or notes.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who saved this prediction."
+        },
+        "period": {
+          "type": "string",
+          "description": "The lottery draw period, e.g., '2026165'."
+        },
+        "predictedNumbers": {
+          "type": "array",
+          "description": "Six excluded numbers from 1 to 49 calculated or cached at that period."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Custom comments or analysis notes written by the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The ISO timestamp when the record was saved."
+        }
+      },
+      "required": ["userId", "period", "predictedNumbers", "createdAt"]
+    },
+    "UserTracker": {
+      "title": "UserTracker",
+      "description": "Active target trackers configured by a user for specific numbers.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID."
+        },
+        "monitoredNumbers": {
+          "type": "array",
+          "description": "Numbers (1-49) the user is actively tracking for gap indicators."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The last configuration update timestamp."
+        }
+      },
+      "required": ["userId", "monitoredNumbers", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/saved_predictions/{predictionId}": {
+      "schema": "SavedPrediction",
+      "description": "Collection of user-saved predictions and custom notes."
+    },
+    "/user_trackers/{trackerId}": {
+      "schema": "UserTracker",
+      "description": "A singleton per-user tracking list for monitoring alerts."
+    }
+  }
+}

@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. catch-all default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helper Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Entity Specific Validators ---
+    function isValidSavedPrediction(data) {
+      return data.keys().hasAll(['userId', 'period', 'predictedNumbers', 'notes', 'createdAt'])
+        && data.keys().size() == 5
+        && data.userId is string
+        && data.userId.size() <= 128
+        && data.period is string
+        && data.period.size() <= 32
+        && data.predictedNumbers is list
+        && data.predictedNumbers.size() == 6
+        && data.notes is string
+        && data.notes.size() <= 2000
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserTracker(data) {
+      return data.keys().hasAll(['userId', 'monitoredNumbers', 'updatedAt'])
+        && data.keys().size() == 3
+        && data.userId is string
+        && data.userId.size() <= 128
+        && data.monitoredNumbers is list
+        && data.monitoredNumbers.size() <= 49
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Routes ---
+    
+    // User Saved Predictions
+    match /saved_predictions/{predictionId} {
+      allow get, list: if isSignedIn() 
+        && existing().userId == request.auth.uid;
+
+      allow create: if isEmailVerified()
+        && isValidId(predictionId)
+        && isValidSavedPrediction(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+
+      allow update: if isEmailVerified()
+        && isValidId(predictionId)
+        && isValidSavedPrediction(incoming())
+        && incoming().userId == request.auth.uid
+        && existing().userId == request.auth.uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['notes', 'predictedNumbers']);
+
+      allow delete: if isSignedIn()
+        && existing().userId == request.auth.uid;
+    }
+
+    // User Tracked Numbers
+    match /user_trackers/{trackerId} {
+      allow get, list: if isSignedIn()
+        && existing().userId == request.auth.uid;
+
+      allow create: if isEmailVerified()
+        && isValidId(trackerId)
+        && isValidUserTracker(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().updatedAt == request.time;
+
+      allow update: if isEmailVerified()
+        && isValidId(trackerId)
+        && isValidUserTracker(incoming())
+        && incoming().userId == request.auth.uid
+        && existing().userId == request.auth.uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['monitoredNumbers', 'updatedAt'])
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isSignedIn()
+        && existing().userId == request.auth.uid;
+    }
+  }
+}
