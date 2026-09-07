@@ -176,7 +176,7 @@ export default function App() {
               <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">Expert V1.2</span>
             </div>
             <p className="text-xs text-slate-400">
-              采用隔期跳跃触发机制锁定夹心变动，通过环形邻轨排除策略精炼 6 位不出现号码
+              使用 Gemini 3.5 混沌概率引擎，深度学习与自适应纠偏机制。
             </p>
           </div>
 
