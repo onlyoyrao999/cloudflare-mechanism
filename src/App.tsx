@@ -332,7 +332,7 @@ export default function App() {
                 专家排除算法绩效
               </h3>
               <p className="text-[11px] text-slate-500">
-                双重对冲防线下的 6 号排除算法在 165 期历史中的真实准确性
+                双重对冲防线下的 6 号排除算法在 49 期历史中的真实准确性
               </p>
             </div>
 
@@ -495,6 +495,48 @@ export default function App() {
             </div>
 
             <div className="space-y-3">
+              {/* PENDING PREDICTION (Next Draw) */}
+              <div key="pending" className="bg-slate-950/60 border border-slate-850 p-4 rounded-xl flex flex-col md:flex-row md:items-center gap-4 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500/50" />
+                <div className="flex-shrink-0 w-28">
+                  <span className="text-xs font-mono font-bold text-slate-300 block mb-1">
+                    第 {(parseInt(latestDraw.period, 10) + 1).toString()} 期
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded">
+                    <Clock className="w-3 h-3" />
+                    待回测
+                  </span>
+                </div>
+                
+                <div className="flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-1">系统排除名单:</span>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {prediction.predictedNumbers.map((num, idx) => (
+                          <span 
+                            key={idx} 
+                            className="w-6 h-6 flex items-center justify-center rounded text-[11px] font-mono font-bold border bg-slate-900 border-slate-800 text-slate-400 shadow-sm"
+                          >
+                            {num.toString().padStart(2, '0')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-1">实际开奖结果:</span>
+                      <div className="flex gap-1 flex-wrap opacity-60">
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-800 border-dashed flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                          等待公布...
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {data.predictions.slice(-10).reverse().map((pred) => {
                 const isSuccess = pred.isSuccessful;
                 const hitCount = pred.hitNumbers ? pred.hitNumbers.length : 0;
@@ -569,7 +611,7 @@ export default function App() {
       <footer className="border-t border-slate-900 bg-slate-950 py-6 mt-16 text-center text-xs text-slate-500 font-mono px-4">
         <div className="max-w-7xl mx-auto space-y-2">
           <p>
-            MacauJC 赛马轨迹分析客户端. 所有推导逻辑及回测轨迹归档均在服务器端本地计算。
+            MacauJC 赛马轨迹分析客户端. 所有深度推导逻辑由 Gemini 3.5 人工智能大模型强力驱动，回测轨迹归档于 KV 边缘网络。
           </p>
           <p className="text-[10px] text-slate-650">
             © 2026 混沌数理概率研究组。本系统仅用作学术算法之研究及概率模型回测，不包含任何商业性推广行为。

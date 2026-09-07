@@ -67,7 +67,7 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
 
   try {
     const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
-    const recordsText = rawRecords.slice(0, 165).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
+    const recordsText = rawRecords.slice(0, 49).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
 
     let feedbackContext = "";
     if (lastPredictions && lastPredictions.length > 0) {
@@ -80,33 +80,33 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
     }
 
     const prompt = `您是一位高等概率论专家和赛马彩票混沌学学者。
-现在我们将向您提供澳门赛马会最近的 165 期开奖历史数据。每一期包含 7 个开奖号码（范围从 01 到 49）。
+现在我们将向您提供澳门赛马会最近的 49 期开奖历史数据。每一期包含 7 个开奖号码（范围从 01 到 49）。
 ${feedbackContext}
-
+ 
 【重要分析理论与对冲规则】：
 1. 隔期同号轨迹（Hedge 对冲防线）：当前有些号码正处于活跃的轨迹追逐周期中。这些号码在接下来的开奖中出现概率极高。
    - 处于追逐周期中的活跃目标号：[${activeNumbers.join(', ')}]
    - ⚠️【绝对禁区】：在您预测的“不可能开出的6个号码”中，**绝对不能**包含这几个活跃目标号码！因为它们随时可能反弹回补。
-
+ 
 2. 防止推荐重复（上一期排除重合限制）：
    - 上一期已排除的6个号码是：[${lastPredictions.join(', ')}]
    - ⚠️【限制】：确保本期的预测名单与上一期的 [${lastPredictions.join(', ')}] 不完全相同，让排除名单具有周期时效变化。
-
+ 
 3. 遗漏与冷热对冲：
    - 您应该评估 49 码的总体出现频次、近期遗漏周期，并结合混沌理论推演下一期（第 ${parseInt(latestDraw.period, 10) + 1} 期）最不可能出现的 6 个号码。
-
-以下是前面165期开奖数据（最新期在最上面）：
+ 
+以下是前面49期开奖数据（最新期在最上面）：
 ${recordsText}
-
+ 
 请在进行高精度数理逻辑推演后，计算出下一期最不可能出现的6个号码（范围为 1 到 49，必须是 6 个互不相同的整数，按升序排列）。
-
+ 
 您必须返回符合以下 JSON 结构的预测：
 {
   "predictedNumbers": [number, number, number, number, number, number],
   "reasoning": {
     "triggerLocking": "根据隔期特征，讨论排除名单中对当前活跃追踪目标号 [${activeNumbers.join(', ')}] 执行的安全加锁与防回弹屏障过程，使用极具专业度的中文描绘",
     "edgeDeduction": "详细阐释首尾边缘环形运算下对高回补落点的绕道对冲策略（如果上期失败，需阐述本次的修正方案），使用极具专业度的中文描绘",
-    "omissionConclusion": "结合165期大盘冷态指标及遗漏波峰，全面推导论述此 6 个号码不可能出现的必然逻辑，使用极具专业度的中文描绘"
+    "omissionConclusion": "结合49期大盘冷态指标及遗漏波峰，全面推导论述此 6 个号码不可能出现的必然逻辑，使用极具专业度的中文描绘"
   }
 }`;
 
