@@ -203,8 +203,7 @@ async function getAIPrediction(
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!process.env.GEMINI_API_KEY) {
-    console.log('No GEMINI_API_KEY. Using mathematical fallback prediction.');
-    return { ...mathPredict, isAIPowered: false };
+    throw new Error('API连接异常: 未配置 GEMINI_API_KEY');
   }
 
   try {
@@ -359,40 +358,20 @@ ${recordsText}
       },
       isAIPowered: true,
     };
-  } catch (err) {
-    console.error('Gemini prediction generation failed, gracefully falling back to math model:', err);
-    return { ...mathPredict, isAIPowered: false };
+  } catch (err: any) {
+    console.error('Gemini prediction generation failed:', err);
+    throw new Error('API连接异常: ' + err.message);
   }
 }
 
 // 1. API: Get full analytical model
 app.get('/api/analyze', async (req, res) => {
-  // Check if we should passively trigger a scrape to check for 21:35 updates
-  // Only scrape if the cache doesn't exist or is older than 5 minutes since last check (using simple timestamp files)
-  const timestampPath = path.resolve('src/data/last_check.txt');
-  let shouldCheck = false;
-  
-  if (!fs.existsSync(timestampPath)) {
-    shouldCheck = true;
-  } else {
-    try {
-      const lastCheckTime = parseInt(fs.readFileSync(timestampPath, 'utf8').trim(), 10);
-      if (isNaN(lastCheckTime) || Date.now() - lastCheckTime > 5 * 60 * 1000) {
-        shouldCheck = true;
-      }
-    } catch {
-      shouldCheck = true;
-    }
-  }
-
-  if (shouldCheck) {
-    try {
-      fs.writeFileSync(timestampPath, Date.now().toString(), 'utf8');
-      console.log('Passively refreshing lottery drawings check...');
-      await scrapeLatest();
-    } catch (e) {
-      console.error('Passive scrape error:', e);
-    }
+  // Unconditionally fetch latest records on every page load
+  try {
+    console.log('Passively refreshing lottery drawings check on page load...');
+    await scrapeLatest();
+  } catch (e) {
+    console.error('Passive scrape error:', e);
   }
 
   const rawRecords = getRecords();
