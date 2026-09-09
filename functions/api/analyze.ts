@@ -5,7 +5,7 @@ export async function onRequestGet(context: any) {
   const { env } = context;
 
   try {
-    // Passively refresh cache in KV if needed
+    // 1. 被动刷新大盘数据机制
     const lastCheckTimeStr = await env.MACAUJC_KV.get('last_check');
     const lastCheckTime = lastCheckTimeStr ? parseInt(lastCheckTimeStr, 10) : 0;
     
@@ -14,6 +14,7 @@ export async function onRequestGet(context: any) {
       await scrapeLatest(env);
     }
 
+    // 2. 提取大盘历史记录
     const kvData = await env.MACAUJC_KV.get('history');
     const rawRecords = kvData ? JSON.parse(kvData) : [];
     
@@ -21,36 +22,42 @@ export async function onRequestGet(context: any) {
       return new Response(JSON.stringify({ status: 'error', message: 'No records available.' }), { status: 500 });
     }
 
-    // --- NEW: Fetch permanent AI history from KV ---
+    // 3. 提取永久 AI 历史库，并送入引擎回测
     const historyKvData = await env.MACAUJC_KV.get('ai_history');
     const aiHistoryMap = historyKvData ? JSON.parse(historyKvData) : {};
-
-    // Pass the fetched history map to analyzeData so it doesn't recalculate history
     const analysis = analyzeData(rawRecords, aiHistoryMap);
     
     const lastPredictions = analysis.predictions.length > 0 ? analysis.predictions[analysis.predictions.length - 1].predictedNumbers : [];
     const currentPeriod = rawRecords[0]?.period || '';
     
-    // Check prediction cache in KV for the current waiting period
+    // 【关键修复点】：精准计算“即将开奖的下一期”的真实期号
+    const targetPeriodForPrediction = (parseInt(currentPeriod, 10) + 1).toString();
+    
+    // 4. 读取缓存，但加入“严苛的期号对齐校验”
     let prediction = null;
     const cacheData = await env.MACAUJC_KV.get('prediction_cache');
     if (cacheData) {
       const parsed = JSON.parse(cacheData);
-      if (parsed.period === currentPeriod) {
+      // 如果缓存的期号，就是我们需要推算的下一期期号，才允许复用缓存！
+      // 否则（比如大盘到了 253，缓存却还是 252 甚至是 251 的旧数据），直接作废不用，强制重新算。
+      if (parsed.period === targetPeriodForPrediction) {
         prediction = parsed.prediction;
       }
     }
 
+    // 5. 如果没有有效缓存，生成新预测并双重落库
     if (!prediction) {
       prediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
       
-      // Save temporary cache
-      await env.MACAUJC_KV.put('prediction_cache', JSON.stringify({ period: currentPeriod, prediction }));
+      // 临时缓存：这次绑定的就是真正的目标期号 (如 254)
+      await env.MACAUJC_KV.put('prediction_cache', JSON.stringify({ 
+        period: targetPeriodForPrediction, 
+        prediction 
+      }));
       
-      // --- NEW: Lock and save the generated prediction to permanent history! ---
-      const nextP = (parseInt(currentPeriod, 10) + 1).toString();
-      if (nextP && prediction.predictedNumbers) {
-        aiHistoryMap[nextP] = prediction.predictedNumbers;
+      // 永久历史库追加：把刚算出来的这批新鲜号码，用正确的期号锁定进去
+      if (prediction.predictedNumbers) {
+        aiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
         await env.MACAUJC_KV.put('ai_history', JSON.stringify(aiHistoryMap));
       }
     }
@@ -66,6 +73,7 @@ export async function onRequestGet(context: any) {
     }), {
       headers: { 'Content-Type': 'application/json' },
     });
+
   } catch (error: any) {
     return new Response(JSON.stringify({ status: 'error', message: error.message }), { status: 500 });
   }
