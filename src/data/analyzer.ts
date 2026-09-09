@@ -65,7 +65,7 @@ export function getCircularPositions(P: number): number[] {
  * Computes all triggers, stats, and predictions from the complete raw records.
  * Raw records are sorted in descending order (newest first).
  */
-export function analyzeData(rawRecords: DrawRecord[]): {
+export function analyzeData(rawRecords: DrawRecord[], aiHistoryMap: Record<string, number[]> = {}): {
   recordsAsc: DrawRecord[];
   triggers: TriggerEvent[];
   frequencyStats: FrequencyStats[];
@@ -282,8 +282,14 @@ export function analyzeData(rawRecords: DrawRecord[]): {
     // Sort by score ascending (lowest score is safest to exclude)
     candidateScores.sort((a, b) => a.score - b.score);
 
-    // Pick top 6
-    const predictedNumbers = candidateScores.slice(0, 6).map(c => c.num);
+    // Pick top 6 or use AI history if available
+    let predictedNumbers: number[];
+    if (aiHistoryMap[targetPeriod] && aiHistoryMap[targetPeriod].length === 6) {
+      predictedNumbers = aiHistoryMap[targetPeriod];
+    } else {
+      predictedNumbers = candidateScores.slice(0, 6).map(c => c.num);
+    }
+    
     activePredictionsMap[targetPeriod] = predictedNumbers;
 
     // Validate the prediction against actual numbers drawn in targetPeriod

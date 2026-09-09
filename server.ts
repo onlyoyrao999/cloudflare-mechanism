@@ -77,6 +77,32 @@ function clearCachedPredictionFile() {
 }
 
 
+const aiHistoryFilePath = path.resolve('src/data/ai_history.json');
+
+function getAIHistoryMap(): Record<string, number[]> {
+  try {
+    if (fs.existsSync(aiHistoryFilePath)) {
+      const data = fs.readFileSync(aiHistoryFilePath, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error reading AI history:', error);
+  }
+  return {};
+}
+
+function saveAIPredictionToHistory(targetPeriod: string, predictedNumbers: number[]) {
+  try {
+    const historyMap = getAIHistoryMap();
+    historyMap[targetPeriod] = predictedNumbers;
+    const dir = path.dirname(aiHistoryFilePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(aiHistoryFilePath, JSON.stringify(historyMap, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error saving AI prediction to history:', error);
+  }
+}
+
 app.use(express.json());
 
 // ---------------------------------------------------------------------------------
@@ -172,7 +198,10 @@ async function scrapeLatest(): Promise<{ success: boolean; count: number; messag
     }));
     mergedList.sort((a, b) => b.period.localeCompare(a.period));
 
-    saveRecords(mergedList);
+    if (addedCount > 0) {
+      saveRecords(mergedList);
+    }
+    
     return {
       success: true,
       count: mergedList.length,
@@ -379,7 +408,7 @@ app.get('/api/analyze', async (req, res) => {
     return res.status(500).json({ status: 'error', message: 'No records available.' });
   }
 
-  const analysis = analyzeData(rawRecords);
+  const analysis = analyzeData(rawRecords, getAIHistoryMap());
   
   // Predict next period based on computed results and history
   const lastPredictions = analysis.predictions.length > 0 
@@ -389,8 +418,12 @@ app.get('/api/analyze', async (req, res) => {
   const currentPeriod = rawRecords[0]?.period || '';
   let prediction = getCachedPrediction(currentPeriod);
   if (!prediction) {
-    prediction = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
-    savePredictionCache(currentPeriod, prediction);
+    try {
+      prediction = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
+      savePredictionCache(currentPeriod, prediction); const nextP = (parseInt(currentPeriod, 10)+1).toString(); if (nextP && prediction.predictedNumbers) { saveAIPredictionToHistory(nextP, prediction.predictedNumbers); }
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'AI 预测失败' });
+    }
   }
 
   res.json({

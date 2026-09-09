@@ -487,7 +487,7 @@ export default function App() {
               <div>
                 <h3 className="text-sm font-semibold text-white flex items-center gap-2">
                   <Activity className="w-4 h-4 text-emerald-400" />
-                  <span>最近 10 期历史回测记录 (KV Storage)</span>
+                  <span>最近 10 期历史回测记录</span>
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-1">
                   用于检视模型排除命中率，自动反馈至下一期策略
