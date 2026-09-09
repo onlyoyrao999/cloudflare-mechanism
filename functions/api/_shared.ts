@@ -41,6 +41,11 @@ export async function scrapeLatest(env: any) {
       period, numbers,
     }));
     mergedList.sort((a, b) => b.period.localeCompare(a.period));
+    
+    // 强制截断，只保留最新的 50 期记录（对应过去代码中的 49 期历史 + 最新 1 期）
+    if (mergedList.length > 50) {
+      mergedList.length = 50;
+    }
 
     await env.MACAUJC_KV.put('history', JSON.stringify(mergedList));
     
