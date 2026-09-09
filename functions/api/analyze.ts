@@ -21,11 +21,17 @@ export async function onRequestGet(context: any) {
       return new Response(JSON.stringify({ status: 'error', message: 'No records available.' }), { status: 500 });
     }
 
-    const analysis = analyzeData(rawRecords);
+    // --- NEW: Fetch permanent AI history from KV ---
+    const historyKvData = await env.MACAUJC_KV.get('ai_history');
+    const aiHistoryMap = historyKvData ? JSON.parse(historyKvData) : {};
+
+    // Pass the fetched history map to analyzeData so it doesn't recalculate history
+    const analysis = analyzeData(rawRecords, aiHistoryMap);
+    
     const lastPredictions = analysis.predictions.length > 0 ? analysis.predictions[analysis.predictions.length - 1].predictedNumbers : [];
     const currentPeriod = rawRecords[0]?.period || '';
     
-    // Check prediction cache in KV
+    // Check prediction cache in KV for the current waiting period
     let prediction = null;
     const cacheData = await env.MACAUJC_KV.get('prediction_cache');
     if (cacheData) {
@@ -37,7 +43,16 @@ export async function onRequestGet(context: any) {
 
     if (!prediction) {
       prediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
+      
+      // Save temporary cache
       await env.MACAUJC_KV.put('prediction_cache', JSON.stringify({ period: currentPeriod, prediction }));
+      
+      // --- NEW: Lock and save the generated prediction to permanent history! ---
+      const nextP = (parseInt(currentPeriod, 10) + 1).toString();
+      if (nextP && prediction.predictedNumbers) {
+        aiHistoryMap[nextP] = prediction.predictedNumbers;
+        await env.MACAUJC_KV.put('ai_history', JSON.stringify(aiHistoryMap));
+      }
     }
 
     return new Response(JSON.stringify({

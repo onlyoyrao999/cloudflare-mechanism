@@ -538,7 +538,11 @@ export default function App() {
                 </div>
               </div>
 
-              {data.predictions.slice(-10).reverse().map((pred) => {
+              {data.predictions
+                .filter(pred => pred.isRealAI)
+                .slice(-10)
+                .reverse()
+                .map((pred) => {
                 const isSuccess = pred.isSuccessful;
                 const hitCount = pred.hitNumbers ? pred.hitNumbers.length : 0;
                 

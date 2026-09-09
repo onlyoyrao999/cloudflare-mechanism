@@ -284,8 +284,10 @@ export function analyzeData(rawRecords: DrawRecord[], aiHistoryMap: Record<strin
 
     // Pick top 6 or use AI history if available
     let predictedNumbers: number[];
+    let isRealAI = false;
     if (aiHistoryMap[targetPeriod] && aiHistoryMap[targetPeriod].length === 6) {
       predictedNumbers = aiHistoryMap[targetPeriod];
+      isRealAI = true;
     } else {
       predictedNumbers = candidateScores.slice(0, 6).map(c => c.num);
     }
@@ -303,6 +305,7 @@ export function analyzeData(rawRecords: DrawRecord[], aiHistoryMap: Record<strin
       actualNumbers,
       isSuccessful,
       hitNumbers,
+      isRealAI,
     });
   }
 
