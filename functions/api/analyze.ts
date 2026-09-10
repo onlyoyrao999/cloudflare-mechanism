@@ -45,7 +45,25 @@ export async function onRequestGet(context: any) {
       }
     }
 
-    // 5. 如果没有有效缓存，生成新预测并双重落库
+    // 5. 如果缓存里没有，再看看 ai_history 里面有没有（比如用户手动添加了历史）
+    if (!prediction && aiHistoryMap[targetPeriodForPrediction] && aiHistoryMap[targetPeriodForPrediction].length > 0) {
+       prediction = {
+         predictedNumbers: aiHistoryMap[targetPeriodForPrediction],
+         activeTargets: [],
+         reasoning: {
+           triggerLocking: "通过历史记录直接提取，无需重新分析。",
+           momentumState: "由后台永久库读取配置。",
+           exclusionTargets: "手动对齐历史节点。"
+         }
+       };
+       // 把这个基本结构写回 prediction_cache 保持结构完整
+       await env.MACAUJC_KV.put('prediction_cache', JSON.stringify({ 
+         period: targetPeriodForPrediction, 
+         prediction 
+       }));
+    }
+
+    // 6. 如果都没数据，才真正去呼叫 Gemini
     if (!prediction) {
       prediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
       
