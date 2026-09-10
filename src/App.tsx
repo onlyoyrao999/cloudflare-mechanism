@@ -61,17 +61,7 @@ export default function App() {
     const initialize = async () => {
       setLoading(true);
       setError(null);
-      try {
-        const refreshRes = await fetch('/api/refresh', { method: 'POST' });
-        const refreshData = await refreshRes.json();
-        
-        if (refreshRes.ok) {
-          // 抓取成功，静默通过
-        }
-      } catch (err) {
-        console.error("Initial refresh failed:", err);
-      }
-      // After forcing the pull, activate subsequent steps
+      // Removed /api/refresh on initial load to prevent unnecessary requests
       await fetchAnalysis();
     };
 

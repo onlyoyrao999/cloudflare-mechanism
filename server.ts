@@ -384,11 +384,22 @@ ${recordsText}
 }
 
 // 1. API: Get full analytical model
+let localLastScrapeDate = '';
 app.get('/api/analyze', async (req, res) => {
-  // Unconditionally fetch latest records on every page load
   try {
-    console.log('Passively refreshing lottery drawings check on page load...');
-    await scrapeLatest();
+    const nowUtc = new Date();
+    const nowUtc8 = new Date(nowUtc.getTime() + 8 * 60 * 60 * 1000);
+    const todayDateStr = `${nowUtc8.getUTCFullYear()}-${String(nowUtc8.getUTCMonth() + 1).padStart(2, '0')}-${String(nowUtc8.getUTCDate()).padStart(2, '0')}`;
+    const hours = nowUtc8.getUTCHours();
+    const minutes = nowUtc8.getUTCMinutes();
+    
+    if (hours > 21 || (hours === 21 && minutes >= 35)) {
+      if (localLastScrapeDate !== todayDateStr) {
+        console.log(`Time is past 21:35 UTC+8. Last scrape was ${localLastScrapeDate}. Scraping now...`);
+        localLastScrapeDate = todayDateStr;
+        await scrapeLatest();
+      }
+    }
   } catch (e) {
     console.error('Passive scrape error:', e);
   }

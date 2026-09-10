@@ -5,13 +5,20 @@ export async function onRequestGet(context: any) {
   const { env } = context;
 
   try {
-    // 1. 被动刷新大盘数据机制
-    const lastCheckTimeStr = await env.MACAUJC_KV.get('last_check');
-    const lastCheckTime = lastCheckTimeStr ? parseInt(lastCheckTimeStr, 10) : 0;
-    
-    if (Date.now() - lastCheckTime > 5 * 60 * 1000) {
-      await env.MACAUJC_KV.put('last_check', Date.now().toString());
-      await scrapeLatest(env);
+    // 1. 被动刷新大盘数据机制：每天 21:35 后只拉取一次
+    const nowUtc = new Date();
+    const nowUtc8 = new Date(nowUtc.getTime() + 8 * 60 * 60 * 1000);
+    const todayDateStr = `${nowUtc8.getUTCFullYear()}-${String(nowUtc8.getUTCMonth() + 1).padStart(2, '0')}-${String(nowUtc8.getUTCDate()).padStart(2, '0')}`;
+    const hours = nowUtc8.getUTCHours();
+    const minutes = nowUtc8.getUTCMinutes();
+
+    // 当时间超过 21:35 时，检查今天是否已经拉取过
+    if (hours > 21 || (hours === 21 && minutes >= 35)) {
+      const lastScrapeDate = await env.MACAUJC_KV.get('last_scrape_date');
+      if (lastScrapeDate !== todayDateStr) {
+        await env.MACAUJC_KV.put('last_scrape_date', todayDateStr);
+        await scrapeLatest(env);
+      }
     }
 
     // 2. 提取大盘历史记录
