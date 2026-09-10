@@ -47,13 +47,34 @@ export async function onRequestGet(context: any) {
 
     // 5. 如果没有有效缓存，生成新预测并双重落库
     if (!prediction) {
-      prediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
+      const generatedPrediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
       
-      // 临时缓存：这次绑定的就是真正的目标期号 (如 254)
-      await env.MACAUJC_KV.put('prediction_cache', JSON.stringify({ 
-        period: targetPeriodForPrediction, 
-        prediction 
-      }));
+      const doubleCheckCache = await env.MACAUJC_KV.get("prediction_cache");
+      let otherWorkerAlreadySaved = false;
+      if (doubleCheckCache) {
+        const parsed = JSON.parse(doubleCheckCache);
+        if (parsed.period === targetPeriodForPrediction && parsed.prediction) {
+          prediction = parsed.prediction;
+          otherWorkerAlreadySaved = true;
+        }
+      }
+      
+      if (!otherWorkerAlreadySaved) {
+        prediction = generatedPrediction;
+        
+        await env.MACAUJC_KV.put("prediction_cache", JSON.stringify({
+           period: targetPeriodForPrediction,
+           prediction
+         }));
+        
+        if (prediction.predictedNumbers) {
+          const currentHistoryKv = await env.MACAUJC_KV.get("ai_history");
+          const currentAiHistoryMap = currentHistoryKv ? JSON.parse(currentHistoryKv) : {};
+          currentAiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
+          await env.MACAUJC_KV.put("ai_history", JSON.stringify(currentAiHistoryMap));
+        }
+      }
+    }
       
       // 永久历史库追加：把刚算出来的这批新鲜号码，用正确的期号锁定进去
       if (prediction.predictedNumbers) {

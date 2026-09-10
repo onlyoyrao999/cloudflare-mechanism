@@ -118,6 +118,9 @@ ${recordsText}
     const reqConfig = {
       contents: prompt,
       config: {
+        temperature: 0.1, // 强行降低随机性，确保同一个 prompt 并发产出几乎完全一致的结果
+        topP: 0.1,
+        topK: 1,
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
