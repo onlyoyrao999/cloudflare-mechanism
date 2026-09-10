@@ -350,32 +350,20 @@ ${recordsText}
     predicted.sort((a, b) => a - b);
 
     // Make sure we did not include any active numbers
-    const safePrediction: number[] = [];
+    const safeSet = new Set<number>();
     for (const num of predicted) {
-      if (activeNumbers.includes(num)) {
-        // Swap with the mathematical safe suggestion
-        for (const replacement of mathPredict.predictedNumbers) {
-          if (!predicted.includes(replacement) && !activeNumbers.includes(replacement) && !safePrediction.includes(replacement)) {
-            safePrediction.push(replacement);
-            break;
-          }
-        }
-      } else {
-        safePrediction.push(num);
-      }
+      if (!activeNumbers.includes(num)) safeSet.add(num);
     }
-
-    // Fill up if somehow less than 6
-    while (safePrediction.length < 6) {
-      for (const replacement of mathPredict.predictedNumbers) {
-        if (!safePrediction.includes(replacement) && !activeNumbers.includes(replacement)) {
-          safePrediction.push(replacement);
-          break;
-        }
-      }
+    for (const num of mathPredict.predictedNumbers) {
+      if (safeSet.size >= 6) break;
+      if (!activeNumbers.includes(num)) safeSet.add(num);
     }
-
-    safePrediction.sort((a, b) => a - b);
+    let candidate = 1;
+    while (safeSet.size < 6 && candidate <= 49) {
+      if (!activeNumbers.includes(candidate)) safeSet.add(candidate);
+      candidate++;
+    }
+    const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
 
     return {
       predictedNumbers: safePrediction,

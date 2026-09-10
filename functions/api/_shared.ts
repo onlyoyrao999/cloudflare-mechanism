@@ -155,31 +155,33 @@ ${recordsText}
     if (predicted.length !== 6) return { ...mathPredict, isAIPowered: false };
 
     predicted.sort((a: number, b: number) => a - b);
-    const safePrediction: number[] = [];
+    const safeSet = new Set<number>();
     
+    // 1. Add Gemini's numbers if they are safe
     for (const num of predicted) {
-      if (activeNumbers.includes(num)) {
-        for (const replacement of mathPredict.predictedNumbers) {
-          if (!predicted.includes(replacement) && !activeNumbers.includes(replacement) && !safePrediction.includes(replacement)) {
-            safePrediction.push(replacement);
-            break;
-          }
-        }
-      } else {
-        safePrediction.push(num);
+      if (!activeNumbers.includes(num)) {
+        safeSet.add(num);
       }
     }
-
-    while (safePrediction.length < 6) {
-      for (const replacement of mathPredict.predictedNumbers) {
-        if (!safePrediction.includes(replacement) && !activeNumbers.includes(replacement)) {
-          safePrediction.push(replacement);
-          break;
-        }
+    
+    // 2. Fill the rest with mathPredict if safe
+    for (const num of mathPredict.predictedNumbers) {
+      if (safeSet.size >= 6) break;
+      if (!activeNumbers.includes(num)) {
+        safeSet.add(num);
       }
     }
-
-    safePrediction.sort((a, b) => a - b);
+    
+    // 3. If STILL not 6, fill with any valid number 1-49
+    let candidate = 1;
+    while (safeSet.size < 6 && candidate <= 49) {
+      if (!activeNumbers.includes(candidate)) {
+        safeSet.add(candidate);
+      }
+      candidate++;
+    }
+    
+    const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
 
     return {
       predictedNumbers: safePrediction,
