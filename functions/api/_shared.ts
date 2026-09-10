@@ -115,8 +115,7 @@ ${recordsText}
   }
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const reqConfig = {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -133,7 +132,21 @@ ${recordsText}
           required: ['predictedNumbers', 'reasoning'],
         },
       },
-    });
+    };
+
+    let response;
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-3.6-flash',
+        ...reqConfig
+      });
+    } catch (err36: any) {
+      console.warn('gemini-3.6-flash 调用失败，自动降级为 gemini-3.5-flash:', err36.message);
+      response = await ai.models.generateContent({
+        model: 'gemini-3.5-flash',
+        ...reqConfig
+      });
+    }
 
     const body = JSON.parse(response.text?.trim() || '{}');
     let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
@@ -178,8 +191,16 @@ ${recordsText}
       },
       isAIPowered: true,
     };
-  } catch (err) {
+  } catch (err: any) {
     console.error('Gemini error:', err);
-    return { ...mathPredict, isAIPowered: false };
+    return { 
+      ...mathPredict, 
+      isAIPowered: false,
+      reasoning: {
+        triggerLocking: `[AI 接口调用失败: ${err.message}] 系统已自动降级为本地高精度统计算法。\n` + mathPredict.reasoning.triggerLocking,
+        edgeDeduction: mathPredict.reasoning.edgeDeduction,
+        omissionConclusion: mathPredict.reasoning.omissionConclusion
+      }
+    };
   }
 }
