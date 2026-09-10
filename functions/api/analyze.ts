@@ -76,12 +76,6 @@ export async function onRequestGet(context: any) {
       }
     }
       
-      // 永久历史库追加：把刚算出来的这批新鲜号码，用正确的期号锁定进去
-      if (prediction.predictedNumbers) {
-        aiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
-        await env.MACAUJC_KV.put('ai_history', JSON.stringify(aiHistoryMap));
-      }
-    }
 
     return new Response(JSON.stringify({
       latestDraw: rawRecords[0],
