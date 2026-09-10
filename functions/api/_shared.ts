@@ -31,7 +31,12 @@ export async function scrapeLatest(env: any) {
         const numsStr = match[2];
         const numbers = numsStr.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
         if (numbers.length > 0) {
-          if (!recordsMap.has(period)) addedCount++;
+          if (!recordsMap.has(period)) {
+            // Only consider it added if it is NEWER than the newest record we already have, or if we have no existing records
+            if (existing.length === 0 || parseInt(period, 10) > parseInt(existing[0].period, 10)) {
+              addedCount++;
+            }
+          }
           recordsMap.set(period, numbers);
         }
       }

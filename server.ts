@@ -184,7 +184,9 @@ async function scrapeLatest(): Promise<{ success: boolean; count: number; messag
         const numbers = numsStr.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
         if (numbers.length > 0) {
           if (!recordsMap.has(period)) {
-            addedCount++;
+            if (existing.length === 0 || parseInt(period, 10) > parseInt(existing[0].period, 10)) {
+              addedCount++;
+            }
           }
           recordsMap.set(period, numbers);
         }
