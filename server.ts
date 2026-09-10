@@ -430,8 +430,9 @@ app.post('/api/refresh', async (req, res) => {
   console.log('Force checking lottery results...');
   const result = await scrapeLatest();
   if (result.success) {
-    // Invalidate cache to guarantee a fresh Gemini prediction is made based on the new data
-    clearCachedPredictionFile();
+    if (result.message.includes('Successfully')) {
+      clearCachedPredictionFile();
+    }
     res.json({ status: 'success', message: result.message });
   } else {
     res.status(502).json({ status: 'error', message: result.message });
