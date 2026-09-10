@@ -27,7 +27,6 @@ export default function App() {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // AI report state
   const [aiReport, setAiReport] = useState<string | null>(null);
@@ -67,8 +66,7 @@ export default function App() {
         const refreshData = await refreshRes.json();
         
         if (refreshRes.ok) {
-          setToastMessage(refreshData.message || '已成功拉取最新49期大盘记录！系统已激活。');
-          setTimeout(() => setToastMessage(null), 4000);
+          // 抓取成功，静默通过
         }
       } catch (err) {
         console.error("Initial refresh failed:", err);
@@ -183,21 +181,6 @@ export default function App() {
       
       {/* BACKGROUND EFFECTS */}
       <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-indigo-950/20 via-slate-950/0 to-slate-950/0 pointer-events-none" />
-
-      {/* TOAST MESSAGE */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-4 py-2 rounded-full shadow-lg backdrop-blur-md flex items-center gap-2 text-sm font-medium"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            {toastMessage}
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* TOP HEADER */}
       <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-900 px-4 py-4 md:px-8">
