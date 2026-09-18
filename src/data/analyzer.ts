@@ -24,6 +24,7 @@ export interface ExclusionPrediction {
   actualNumbers?: number[];     // Actual numbers drawn in this period (if available)
   isSuccessful?: boolean;      // True if NONE of the 6 predicted numbers appeared in actualNumbers
   hitNumbers?: number[];       // Numbers that actually appeared (should be empty for success)
+  isRealAI?: boolean;          // True if loaded from real AI history
 }
 
 export interface FrequencyStats {

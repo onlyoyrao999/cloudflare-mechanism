@@ -45,7 +45,14 @@ function getCachedPrediction(currentPeriod: string) {
       const data = fs.readFileSync(cacheFilePath, 'utf8');
       const parsed = JSON.parse(data);
       if (parsed && parsed.period === currentPeriod) {
-        return parsed.prediction;
+        const triggerText = parsed.prediction?.reasoning?.triggerLocking || '';
+        const isPolluted = triggerText.includes('降级') || triggerText.includes('失败') || parsed.prediction?.isAIPowered === false;
+        if (!isPolluted) {
+          return parsed.prediction;
+        } else {
+          console.warn('本地检测到包含降级或失败的脏缓存，予以清理...');
+          clearCachedPredictionFile();
+        }
       }
     }
   } catch (error) {
@@ -343,21 +350,17 @@ ${recordsText}
     // Dedup and slice
     predicted = Array.from(new Set(predicted)).slice(0, 6);
     
-    // If invalid or less than 6, fallback to math prediction
+    // If invalid or less than 6, throw error instead of falling back to math prediction
     if (predicted.length !== 6) {
       console.error('Gemini generated invalid prediction length:', predicted);
-      return { ...mathPredict, isAIPowered: false };
+      throw new Error('Gemini 产出的排除号码不足 6 个有效号码');
     }
 
-    predicted.sort((a, b) => a - b);
+    predicted.sort((a: number, b: number) => a - b);
 
     // Make sure we did not include any active numbers
     const safeSet = new Set<number>();
     for (const num of predicted) {
-      if (!activeNumbers.includes(num)) safeSet.add(num);
-    }
-    for (const num of mathPredict.predictedNumbers) {
-      if (safeSet.size >= 6) break;
       if (!activeNumbers.includes(num)) safeSet.add(num);
     }
     let candidate = 1;
@@ -371,9 +374,9 @@ ${recordsText}
       predictedNumbers: safePrediction,
       activeTargets: activeTargets,
       reasoning: {
-        triggerLocking: body.reasoning.triggerLocking || mathPredict.reasoning.triggerLocking,
-        edgeDeduction: body.reasoning.edgeDeduction || mathPredict.reasoning.edgeDeduction,
-        omissionConclusion: body.reasoning.omissionConclusion || mathPredict.reasoning.omissionConclusion,
+        triggerLocking: body.reasoning.triggerLocking,
+        edgeDeduction: body.reasoning.edgeDeduction,
+        omissionConclusion: body.reasoning.omissionConclusion,
       },
       isAIPowered: true,
     };

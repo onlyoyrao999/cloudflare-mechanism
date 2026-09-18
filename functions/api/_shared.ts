@@ -65,6 +65,42 @@ export async function scrapeLatest(env: any) {
   }
 }
 
+async function generateContentWithRetry(ai: any, request: any, maxRetriesPerModel = 2) {
+  const models = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+  let lastError: any = null;
+
+  for (const model of models) {
+    for (let i = 0; i < maxRetriesPerModel; i++) {
+      try {
+        console.log(`正在使用 ${model} 进行预测推演 (第 ${i + 1} 次尝试)...`);
+        const requestWithModel = { ...request, model };
+        const response = await ai.models.generateContent(requestWithModel);
+        if (response && response.text) {
+          return { response, usedModel: model };
+        }
+      } catch (err: any) {
+        lastError = err;
+        const msg = err.message || JSON.stringify(err);
+        const isUnavailable = err.status === 503 || err.status === 'UNAVAILABLE' || msg.includes('503') || msg.includes('high demand') || msg.includes('UNAVAILABLE');
+
+        console.warn(`模型 ${model} 遇到问题 (${msg})`);
+
+        if (i < maxRetriesPerModel - 1 && isUnavailable) {
+          const waitTime = (i + 1) * 1500;
+          console.warn(`检测到 Gemini 接口高负载，等待 ${waitTime}ms 后重试 ${model}...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else {
+          // 当前模型尝试完毕或非瞬态错误，准备切到下一个模型
+          console.warn(`模型 ${model} 本轮未成功，${models.indexOf(model) < models.length - 1 ? '自动回退至下一个备用模型...' : '所有候选模型已遍历完毕'}`);
+          break;
+        }
+      }
+    }
+  }
+
+  throw new Error(`AI 推理服务暂时不可用 (已尝试 ${models.join(', ')}): ${lastError?.message || '请稍候重试'}`);
+}
+
 export async function getAIPrediction(env: any, rawRecords: any[], triggers: any[], lastPredictions: number[]) {
   const latestDraw = rawRecords[0];
   const mathPredict = predictNextDraw(rawRecords, triggers, lastPredictions);
@@ -72,24 +108,23 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!env.GEMINI_API_KEY) {
-    return { ...mathPredict, isAIPowered: false };
+    throw new Error('未配置 GEMINI_API_KEY，无法调用 Gemini AI 引擎');
   }
 
-  try {
-    const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
-    const recordsText = rawRecords.slice(0, 49).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
+  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const recordsText = rawRecords.slice(0, 49).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
 
-    let feedbackContext = "";
-    if (lastPredictions && lastPredictions.length > 0) {
-      const failedExclusions = lastPredictions.filter(num => latestDraw.numbers.includes(num));
-      if (failedExclusions.length > 0) {
-        feedbackContext = `\n⚠️ 【AI自我修正警告：上期预测回测失败】 ⚠️\n在上一期（第 ${latestDraw.period} 期），预测排除 [${lastPredictions.join(', ')}]，但实际开出了 [${failedExclusions.join(', ')}]。必须引入修正权重避免重复失误！`;
-      } else {
-        feedbackContext = `\n✅ 【AI自我修正回测反馈：上期预测成功】\n上一期排除了 [${lastPredictions.join(', ')}] 且完全命中（未开出）。请保持当前权重。`;
-      }
+  let feedbackContext = "";
+  if (lastPredictions && lastPredictions.length > 0) {
+    const failedExclusions = lastPredictions.filter(num => latestDraw.numbers.includes(num));
+    if (failedExclusions.length > 0) {
+      feedbackContext = `\n⚠️ 【AI自我修正警告：上期预测回测失败】 ⚠️\n在上一期（第 ${latestDraw.period} 期），预测排除 [${lastPredictions.join(', ')}]，但实际开出了 [${failedExclusions.join(', ')}]。必须引入修正权重避免重复失误！`;
+    } else {
+      feedbackContext = `\n✅ 【AI自我修正回测反馈：上期预测成功】\n上一期排除了 [${lastPredictions.join(', ')}] 且完全命中（未开出）。请保持当前权重。`;
     }
+  }
 
-    const prompt = `您是一位高等概率论专家和赛马彩票混沌学学者。
+  const prompt = `您是一位高等概率论专家和赛马彩票混沌学学者。
 现在我们将向您提供澳门赛马会最近的 49 期开奖历史数据。每一期包含 7 个开奖号码（范围从 01 到 49）。
 ${feedbackContext}
  
@@ -120,97 +155,67 @@ ${recordsText}
   }
 }`;
 
-    const reqConfig = {
-      contents: prompt,
-      config: {
-        temperature: 0.1, // 强行降低随机性，确保同一个 prompt 并发产出几乎完全一致的结果
-        topP: 0.1,
-        topK: 1,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            predictedNumbers: { type: Type.ARRAY, items: { type: Type.INTEGER } },
-            reasoning: {
-              type: Type.OBJECT,
-              properties: { triggerLocking: { type: Type.STRING }, edgeDeduction: { type: Type.STRING }, omissionConclusion: { type: Type.STRING } },
-              required: ['triggerLocking', 'edgeDeduction', 'omissionConclusion'],
-            },
+  const reqConfig = {
+    contents: prompt,
+    config: {
+      temperature: 0.1, // 强行降低随机性，确保同一个 prompt 并发产出几乎完全一致的结果
+      topP: 0.1,
+      topK: 1,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          predictedNumbers: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+          reasoning: {
+            type: Type.OBJECT,
+            properties: { triggerLocking: { type: Type.STRING }, edgeDeduction: { type: Type.STRING }, omissionConclusion: { type: Type.STRING } },
+            required: ['triggerLocking', 'edgeDeduction', 'omissionConclusion'],
           },
-          required: ['predictedNumbers', 'reasoning'],
         },
+        required: ['predictedNumbers', 'reasoning'],
       },
-    };
+    },
+  };
 
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        ...reqConfig
-      });
-    } catch (err36: any) {
-      console.warn('gemini-3.6-flash 调用失败，自动降级为 gemini-3.5-flash:', err36.message);
-      response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        ...reqConfig
-      });
-    }
-
-    const body = JSON.parse(response.text?.trim() || '{}');
-    let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
-    predicted = Array.from(new Set(predicted)).slice(0, 6);
-    
-    if (predicted.length !== 6) return { ...mathPredict, isAIPowered: false };
-
-    predicted.sort((a: number, b: number) => a - b);
-    const safeSet = new Set<number>();
-    
-    // 1. Add Gemini's numbers if they are safe
-    for (const num of predicted) {
-      if (!activeNumbers.includes(num)) {
-        safeSet.add(num);
-      }
-    }
-    
-    // 2. Fill the rest with mathPredict if safe
-    for (const num of mathPredict.predictedNumbers) {
-      if (safeSet.size >= 6) break;
-      if (!activeNumbers.includes(num)) {
-        safeSet.add(num);
-      }
-    }
-    
-    // 3. If STILL not 6, fill with any valid number 1-49
-    let candidate = 1;
-    while (safeSet.size < 6 && candidate <= 49) {
-      if (!activeNumbers.includes(candidate)) {
-        safeSet.add(candidate);
-      }
-      candidate++;
-    }
-    
-    const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
-
-    return {
-      predictedNumbers: safePrediction,
-      activeTargets: activeTargets,
-      reasoning: {
-        triggerLocking: body.reasoning.triggerLocking || mathPredict.reasoning.triggerLocking,
-        edgeDeduction: body.reasoning.edgeDeduction || mathPredict.reasoning.edgeDeduction,
-        omissionConclusion: body.reasoning.omissionConclusion || mathPredict.reasoning.omissionConclusion,
-      },
-      isAIPowered: true,
-    };
-  } catch (err: any) {
-    console.error('Gemini error:', err);
-    return { 
-      ...mathPredict, 
-      isAIPowered: false,
-      reasoning: {
-        triggerLocking: `[AI 接口调用失败: ${err.message}] 系统已自动降级为本地高精度统计算法。\n` + mathPredict.reasoning.triggerLocking,
-        edgeDeduction: mathPredict.reasoning.edgeDeduction,
-        omissionConclusion: mathPredict.reasoning.omissionConclusion
-      }
-    };
+  const { response, usedModel } = await generateContentWithRetry(ai, reqConfig);
+  const body = JSON.parse(response.text?.trim() || '{}');
+  let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
+  predicted = Array.from(new Set(predicted)).slice(0, 6);
+  
+  if (predicted.length !== 6) {
+    throw new Error('Gemini 产出的排除号码不足 6 个有效号码');
   }
+
+  predicted.sort((a: number, b: number) => a - b);
+  const safeSet = new Set<number>();
+  
+  // 1. Add Gemini's numbers if they are safe
+  for (const num of predicted) {
+    if (!activeNumbers.includes(num)) {
+      safeSet.add(num);
+    }
+  }
+  
+  // 2. 如果万一与活跃号重叠，从 1-49 中填充安全号码补齐到 6 个
+  let candidate = 1;
+  while (safeSet.size < 6 && candidate <= 49) {
+    if (!activeNumbers.includes(candidate)) {
+      safeSet.add(candidate);
+    }
+    candidate++;
+  }
+  
+  const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
+
+  return {
+    predictedNumbers: safePrediction,
+    activeTargets: activeTargets,
+    reasoning: {
+      triggerLocking: body.reasoning.triggerLocking,
+      edgeDeduction: body.reasoning.edgeDeduction,
+      omissionConclusion: body.reasoning.omissionConclusion,
+    },
+    isAIPowered: true,
+    model: usedModel,
+  };
 }

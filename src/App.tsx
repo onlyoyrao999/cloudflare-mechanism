@@ -42,7 +42,7 @@ export default function App() {
       const response = await fetch('/api/analyze');
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `分析初始化失败: HTTP ${response.status}`);
+        throw new Error(errorData.message || errorData.error || `分析初始化失败: HTTP ${response.status}`);
       }
       const rawData: AnalyzeAPIResponse = await response.json();
       setData(rawData);

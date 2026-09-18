@@ -40,15 +40,25 @@ export async function onRequestGet(context: any) {
     // 【关键修复点】：精准计算“即将开奖的下一期”的真实期号
     const targetPeriodForPrediction = (parseInt(currentPeriod, 10) + 1).toString();
     
-    // 4. 读取缓存，但加入“严苛的期号对齐校验”
+    // 4. 读取缓存，但加入“严苛的期号对齐校验”与“本地降级脏数据过滤清洗”
     let prediction = null;
     const cacheData = await env.MACAUJC_KV.get('prediction_cache');
     if (cacheData) {
-      const parsed = JSON.parse(cacheData);
-      // 如果缓存的期号，就是我们需要推算的下一期期号，才允许复用缓存！
-      // 否则（比如大盘到了 253，缓存却还是 252 甚至是 251 的旧数据），直接作废不用，强制重新算。
-      if (parsed.period === targetPeriodForPrediction) {
-        prediction = parsed.prediction;
+      try {
+        const parsed = JSON.parse(cacheData);
+        if (parsed && parsed.period === targetPeriodForPrediction && parsed.prediction) {
+          const triggerText = parsed.prediction?.reasoning?.triggerLocking || '';
+          const isPolluted = triggerText.includes('降级') || triggerText.includes('失败') || parsed.prediction.isAIPowered === false;
+          if (!isPolluted) {
+            prediction = parsed.prediction;
+          } else {
+            console.warn('检测到历史残留的本地降级脏缓存，立即清除作废...');
+            await env.MACAUJC_KV.delete('prediction_cache');
+          }
+        }
+      } catch (e) {
+        console.warn('解析缓存失败，清理:', e);
+        await env.MACAUJC_KV.delete('prediction_cache');
       }
     }
 
@@ -56,30 +66,36 @@ export async function onRequestGet(context: any) {
     if (!prediction) {
       const generatedPrediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
       
-      const doubleCheckCache = await env.MACAUJC_KV.get("prediction_cache");
-      let otherWorkerAlreadySaved = false;
-      if (doubleCheckCache) {
-        const parsed = JSON.parse(doubleCheckCache);
-        if (parsed.period === targetPeriodForPrediction && parsed.prediction) {
-          prediction = parsed.prediction;
-          otherWorkerAlreadySaved = true;
+      if (generatedPrediction && generatedPrediction.isAIPowered && generatedPrediction.predictedNumbers?.length === 6) {
+        const doubleCheckCache = await env.MACAUJC_KV.get("prediction_cache");
+        let otherWorkerAlreadySaved = false;
+        if (doubleCheckCache) {
+          try {
+            const parsed = JSON.parse(doubleCheckCache);
+            if (parsed.period === targetPeriodForPrediction && parsed.prediction && parsed.prediction.isAIPowered) {
+              prediction = parsed.prediction;
+              otherWorkerAlreadySaved = true;
+            }
+          } catch (e) {
+            // ignore
+          }
         }
-      }
-      
-      if (!otherWorkerAlreadySaved) {
-        prediction = generatedPrediction;
         
-        await env.MACAUJC_KV.put("prediction_cache", JSON.stringify({
-           period: targetPeriodForPrediction,
-           prediction
-         }));
-        
-        if (prediction.predictedNumbers) {
+        if (!otherWorkerAlreadySaved) {
+          prediction = generatedPrediction;
+          
+          await env.MACAUJC_KV.put("prediction_cache", JSON.stringify({
+             period: targetPeriodForPrediction,
+             prediction
+           }));
+          
           const currentHistoryKv = await env.MACAUJC_KV.get("ai_history");
           const currentAiHistoryMap = currentHistoryKv ? JSON.parse(currentHistoryKv) : {};
           currentAiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
           await env.MACAUJC_KV.put("ai_history", JSON.stringify(currentAiHistoryMap));
         }
+      } else {
+        prediction = generatedPrediction;
       }
     }
       
