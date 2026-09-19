@@ -69,10 +69,14 @@ export async function onRequestGet(context: any) {
       }
     }
 
-    // 5. 如果没有有效缓存，生成新预测并双重落库
-    if (!prediction) {
+    // 5. 如果没有有效缓存，或者当前仅为本地保底，尝试生成真实的 Gemini AI 预测
+    if (!prediction || !prediction.isAIPowered) {
       const generatedPrediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
-      prediction = generatedPrediction;
+      if (generatedPrediction && generatedPrediction.isAIPowered) {
+        prediction = generatedPrediction;
+      } else if (!prediction) {
+        prediction = generatedPrediction;
+      }
 
       // 无论是 AI 还是本地精算保底，只要产生有效预测就存入缓存，实现秒开网页
       if (generatedPrediction && generatedPrediction.predictedNumbers?.length === 6) {

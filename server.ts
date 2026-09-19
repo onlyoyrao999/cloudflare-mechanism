@@ -10,38 +10,33 @@ import { GoogleGenAI, Type } from '@google/genai';
 const app = express();
 const PORT = 3000;
 
-async function generateContentWithRetry(ai: any, request: any, maxRetriesPerModel = 2) {
-  const models = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+async function generateContentWithRetry(ai: any, request: any) {
+  const models = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+  let lastError: any = null;
   
   for (const model of models) {
-    for (let i = 0; i < maxRetriesPerModel; i++) {
-      try {
-        const requestWithModel = { ...request, model };
-        
-        // 10秒超时保护，防止网络挂起
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Model ${model} 请求超时 (10s)`)), 10000)
-        );
-        return await Promise.race([
-          ai.models.generateContent(requestWithModel),
-          timeoutPromise
-        ]);
-      } catch (err: any) {
-        const isUnavailable = err.status === 503 || err.status === 'UNAVAILABLE' || (err.message && err.message.includes('503'));
-        
-        // If we exhausted retries for this model OR it's a non-503 error, break to next model
-        if (i === maxRetriesPerModel - 1 || !isUnavailable) {
-          console.warn(`Model ${model} failed (${err.message}). ${models.indexOf(model) < models.length - 1 ? 'Falling back to next model...' : ''}`);
-          break; // Exit inner retry loop, proceed to next model in outer loop
-        }
-        
-        console.warn(`Gemini API busy (503) for ${model}. Retrying in ${Math.pow(2, i + 1)}s...`);
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, i + 1) * 1000));
+    try {
+      console.log(`正在使用 ${model} 引擎进行预测推演...`);
+      const requestWithModel = { ...request, model };
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Model ${model} 请求超时 (8s)`)), 8000)
+      );
+      const res = await Promise.race([
+        ai.models.generateContent(requestWithModel),
+        timeoutPromise
+      ]);
+      if (res && res.text) {
+        console.log(`模型 ${model} 成功响应！`);
+        return { response: res, usedModel: model };
       }
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`模型 ${model} 调用失败 (${err?.status || err?.message})，立即切换至下一备选模型...`);
     }
   }
   
-  throw new Error(`All Gemini models (${models.join(', ')}) failed.`);
+  throw lastError || new Error(`All Gemini models (${models.join(', ')}) failed.`);
 }
 
 // Prediction cache to avoid excessive API requests
@@ -328,8 +323,7 @@ ${recordsText}
 }`;
 
     console.log('Requesting Gemini AI prediction...');
-    const response = await generateContentWithRetry(ai, {
-      model: 'gemini-3.6-flash',
+    const { response, usedModel } = await generateContentWithRetry(ai, {
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -396,9 +390,10 @@ ${recordsText}
         omissionConclusion: body.reasoning.omissionConclusion,
       },
       isAIPowered: true,
+      model: usedModel || 'gemini',
     };
   } catch (err: any) {
-    console.warn('Gemini AI 调用未成功，无缝切换为本地高精度精算模型保底:', err?.message || err);
+    console.error('【AI调用失败原因】:', err);
   }
 
   // 终极保底：本地高精度精算模型，确保系统永远稳定可用、网页秒开
@@ -449,13 +444,29 @@ app.get('/api/analyze', async (req, res) => {
 
   const currentPeriod = rawRecords[0]?.period || '';
   let prediction = getCachedPrediction(currentPeriod);
-  if (!prediction) {
-    prediction = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
-    if (prediction) {
-      savePredictionCache(currentPeriod, prediction);
-      const nextP = (parseInt(currentPeriod, 10)+1).toString();
-      if (nextP && prediction.predictedNumbers && prediction.isAIPowered) {
-        saveAIPredictionToHistory(nextP, prediction.predictedNumbers);
+  
+  // 如果没有缓存，或者缓存为非AI预测（本地保底），优先尝试调用真正的 Gemini AI 预测
+  if (!prediction || !prediction.isAIPowered) {
+    try {
+      console.log('检测到尚未生成真正的 Gemini AI 预测，正在请求 Gemini 3.8 Flash...');
+      const aiPred = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
+      if (aiPred && aiPred.isAIPowered) {
+        prediction = aiPred;
+        savePredictionCache(currentPeriod, prediction);
+        const nextP = (parseInt(currentPeriod, 10)+1).toString();
+        if (nextP && prediction.predictedNumbers) {
+          saveAIPredictionToHistory(nextP, prediction.predictedNumbers);
+        }
+      } else if (!prediction) {
+        prediction = aiPred;
+        if (prediction) {
+          savePredictionCache(currentPeriod, prediction);
+        }
+      }
+    } catch (e) {
+      console.warn('AI prediction request failed, keeping fallback:', e);
+      if (!prediction) {
+        prediction = predictNextDraw(rawRecords, analysis.triggers, lastPredictions);
       }
     }
   }
@@ -539,8 +550,7 @@ app.post('/api/ai-report', async (req, res) => {
 
 字数要求在800字左右，语气要理性、冷静、充满高净值学者风范。必须使用 Markdown 格式输出，文字排版优雅精美。不要使用废话，直奔主题。`;
 
-    const response = await generateContentWithRetry(ai, {
-      model: 'gemini-3.6-flash',
+    const { response } = await generateContentWithRetry(ai, {
       contents: prompt,
     });
 

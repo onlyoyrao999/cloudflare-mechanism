@@ -29,7 +29,7 @@ export async function onRequestPost(context: any) {
 字数要求在800字左右，必须使用 Markdown 格式输出。`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
     });
 
