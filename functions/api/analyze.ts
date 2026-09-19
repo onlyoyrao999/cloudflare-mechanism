@@ -22,8 +22,15 @@ export async function onRequestGet(context: any) {
     }
 
     // 2. 提取大盘历史记录
-    const kvData = await env.MACAUJC_KV.get('history');
-    const rawRecords = kvData ? JSON.parse(kvData) : [];
+    let kvData = await env.MACAUJC_KV.get('history');
+    let rawRecords = kvData ? JSON.parse(kvData) : [];
+    
+    if (rawRecords.length === 0) {
+      console.log('KV 中暂无数据，立即触发首次数据抓取...');
+      await scrapeLatest(env);
+      kvData = await env.MACAUJC_KV.get('history');
+      rawRecords = kvData ? JSON.parse(kvData) : [];
+    }
     
     if (rawRecords.length === 0) {
       return new Response(JSON.stringify({ status: 'error', message: 'No records available.' }), { status: 500 });
@@ -48,11 +55,11 @@ export async function onRequestGet(context: any) {
         const parsed = JSON.parse(cacheData);
         if (parsed && parsed.period === targetPeriodForPrediction && parsed.prediction) {
           const triggerText = parsed.prediction?.reasoning?.triggerLocking || '';
-          const isPolluted = triggerText.includes('降级') || triggerText.includes('失败') || parsed.prediction.isAIPowered === false;
+          const isPolluted = triggerText.includes('降级') || triggerText.includes('失败');
           if (!isPolluted) {
             prediction = parsed.prediction;
           } else {
-            console.warn('检测到历史残留的本地降级脏缓存，立即清除作废...');
+            console.warn('检测到历史残留的脏缓存，立即清除作废...');
             await env.MACAUJC_KV.delete('prediction_cache');
           }
         }
@@ -65,14 +72,16 @@ export async function onRequestGet(context: any) {
     // 5. 如果没有有效缓存，生成新预测并双重落库
     if (!prediction) {
       const generatedPrediction = await getAIPrediction(env, rawRecords, analysis.triggers, lastPredictions);
-      
-      if (generatedPrediction && generatedPrediction.isAIPowered && generatedPrediction.predictedNumbers?.length === 6) {
+      prediction = generatedPrediction;
+
+      // 无论是 AI 还是本地精算保底，只要产生有效预测就存入缓存，实现秒开网页
+      if (generatedPrediction && generatedPrediction.predictedNumbers?.length === 6) {
         const doubleCheckCache = await env.MACAUJC_KV.get("prediction_cache");
         let otherWorkerAlreadySaved = false;
         if (doubleCheckCache) {
           try {
             const parsed = JSON.parse(doubleCheckCache);
-            if (parsed.period === targetPeriodForPrediction && parsed.prediction && parsed.prediction.isAIPowered) {
+            if (parsed.period === targetPeriodForPrediction && parsed.prediction) {
               prediction = parsed.prediction;
               otherWorkerAlreadySaved = true;
             }
@@ -82,20 +91,18 @@ export async function onRequestGet(context: any) {
         }
         
         if (!otherWorkerAlreadySaved) {
-          prediction = generatedPrediction;
-          
           await env.MACAUJC_KV.put("prediction_cache", JSON.stringify({
              period: targetPeriodForPrediction,
              prediction
-           }));
+          }));
           
-          const currentHistoryKv = await env.MACAUJC_KV.get("ai_history");
-          const currentAiHistoryMap = currentHistoryKv ? JSON.parse(currentHistoryKv) : {};
-          currentAiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
-          await env.MACAUJC_KV.put("ai_history", JSON.stringify(currentAiHistoryMap));
+          if (prediction.isAIPowered) {
+            const currentHistoryKv = await env.MACAUJC_KV.get("ai_history");
+            const currentAiHistoryMap = currentHistoryKv ? JSON.parse(currentHistoryKv) : {};
+            currentAiHistoryMap[targetPeriodForPrediction] = prediction.predictedNumbers;
+            await env.MACAUJC_KV.put("ai_history", JSON.stringify(currentAiHistoryMap));
+          }
         }
-      } else {
-        prediction = generatedPrediction;
       }
     }
       

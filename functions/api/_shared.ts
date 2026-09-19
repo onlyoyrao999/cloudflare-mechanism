@@ -108,10 +108,19 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!env.GEMINI_API_KEY) {
-    throw new Error('未配置 GEMINI_API_KEY，无法调用 Gemini AI 引擎');
+    console.warn('未配置 GEMINI_API_KEY，启用本地高精度精算算法');
+    return {
+      ...mathPredict,
+      isAIPowered: false,
+      model: 'local-math',
+    };
   }
 
-  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+  const baseUrl = env.GEMINI_BASE_URL || env.GOOGLE_GEMINI_BASE_URL;
+  const ai = new GoogleGenAI({
+    apiKey: env.GEMINI_API_KEY,
+    ...(baseUrl ? { httpOptions: { baseUrl } } : {}),
+  });
   const recordsText = rawRecords.slice(0, 49).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
 
   let feedbackContext = "";
@@ -177,45 +186,54 @@ ${recordsText}
     },
   };
 
-  const { response, usedModel } = await generateContentWithRetry(ai, reqConfig);
-  const body = JSON.parse(response.text?.trim() || '{}');
-  let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
-  predicted = Array.from(new Set(predicted)).slice(0, 6);
-  
-  if (predicted.length !== 6) {
-    throw new Error('Gemini 产出的排除号码不足 6 个有效号码');
+  try {
+    const { response, usedModel } = await generateContentWithRetry(ai, reqConfig);
+    const body = JSON.parse(response.text?.trim() || '{}');
+    let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
+    predicted = Array.from(new Set(predicted)).slice(0, 6);
+    
+    if (predicted.length === 6) {
+      predicted.sort((a: number, b: number) => a - b);
+      const safeSet = new Set<number>();
+      
+      // 1. Add Gemini's numbers if they are safe
+      for (const num of predicted) {
+        if (!activeNumbers.includes(num)) {
+          safeSet.add(num);
+        }
+      }
+      
+      // 2. 如果万一与活跃号重叠，从 1-49 中填充安全号码补齐到 6 个
+      let candidate = 1;
+      while (safeSet.size < 6 && candidate <= 49) {
+        if (!activeNumbers.includes(candidate)) {
+          safeSet.add(candidate);
+        }
+        candidate++;
+      }
+      
+      const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
+
+      return {
+        predictedNumbers: safePrediction,
+        activeTargets: activeTargets,
+        reasoning: {
+          triggerLocking: body.reasoning.triggerLocking,
+          edgeDeduction: body.reasoning.edgeDeduction,
+          omissionConclusion: body.reasoning.omissionConclusion,
+        },
+        isAIPowered: true,
+        model: usedModel,
+      };
+    }
+  } catch (err: any) {
+    console.warn('Gemini AI 调用未成功，无缝切换为本地高精度精算模型保底:', err?.message || err);
   }
 
-  predicted.sort((a: number, b: number) => a - b);
-  const safeSet = new Set<number>();
-  
-  // 1. Add Gemini's numbers if they are safe
-  for (const num of predicted) {
-    if (!activeNumbers.includes(num)) {
-      safeSet.add(num);
-    }
-  }
-  
-  // 2. 如果万一与活跃号重叠，从 1-49 中填充安全号码补齐到 6 个
-  let candidate = 1;
-  while (safeSet.size < 6 && candidate <= 49) {
-    if (!activeNumbers.includes(candidate)) {
-      safeSet.add(candidate);
-    }
-    candidate++;
-  }
-  
-  const safePrediction = Array.from(safeSet).sort((a, b) => a - b);
-
+  // 终极安全保底：本地高精度概率统计算法，确保系统永不崩溃、网页秒开
   return {
-    predictedNumbers: safePrediction,
-    activeTargets: activeTargets,
-    reasoning: {
-      triggerLocking: body.reasoning.triggerLocking,
-      edgeDeduction: body.reasoning.edgeDeduction,
-      omissionConclusion: body.reasoning.omissionConclusion,
-    },
-    isAIPowered: true,
-    model: usedModel,
+    ...mathPredict,
+    isAIPowered: false,
+    model: 'local-math',
   };
 }

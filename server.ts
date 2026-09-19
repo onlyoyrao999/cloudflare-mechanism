@@ -17,7 +17,15 @@ async function generateContentWithRetry(ai: any, request: any, maxRetriesPerMode
     for (let i = 0; i < maxRetriesPerModel; i++) {
       try {
         const requestWithModel = { ...request, model };
-        return await ai.models.generateContent(requestWithModel);
+        
+        // 10秒超时保护，防止网络挂起
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Model ${model} 请求超时 (10s)`)), 10000)
+        );
+        return await Promise.race([
+          ai.models.generateContent(requestWithModel),
+          timeoutPromise
+        ]);
       } catch (err: any) {
         const isUnavailable = err.status === 503 || err.status === 'UNAVAILABLE' || (err.message && err.message.includes('503'));
         
@@ -46,7 +54,7 @@ function getCachedPrediction(currentPeriod: string) {
       const parsed = JSON.parse(data);
       if (parsed && parsed.period === currentPeriod) {
         const triggerText = parsed.prediction?.reasoning?.triggerLocking || '';
-        const isPolluted = triggerText.includes('降级') || triggerText.includes('失败') || parsed.prediction?.isAIPowered === false;
+        const isPolluted = triggerText.includes('降级') || triggerText.includes('失败');
         if (!isPolluted) {
           return parsed.prediction;
         } else {
@@ -241,17 +249,26 @@ async function getAIPrediction(
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('API连接异常: 未配置 GEMINI_API_KEY');
+    console.warn('未配置 GEMINI_API_KEY，启用本地高精度精算算法');
+    return {
+      ...mathPredict,
+      isAIPowered: false,
+      model: 'local-math',
+    };
   }
+
+  const baseUrl = process.env.GEMINI_BASE_URL || process.env.GOOGLE_GEMINI_BASE_URL;
 
   try {
     const ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
+      ...(baseUrl ? { httpOptions: { baseUrl } } : {
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
         },
-      },
+      }),
     });
 
     // Provide the 49 lottery periods as statistical text context
@@ -381,9 +398,15 @@ ${recordsText}
       isAIPowered: true,
     };
   } catch (err: any) {
-    console.error('Gemini prediction generation failed:', err);
-    throw new Error('API连接异常: ' + err.message);
+    console.warn('Gemini AI 调用未成功，无缝切换为本地高精度精算模型保底:', err?.message || err);
   }
+
+  // 终极保底：本地高精度精算模型，确保系统永远稳定可用、网页秒开
+  return {
+    ...mathPredict,
+    isAIPowered: false,
+    model: 'local-math',
+  };
 }
 
 // 1. API: Get full analytical model
@@ -407,7 +430,12 @@ app.get('/api/analyze', async (req, res) => {
     console.error('Passive scrape error:', e);
   }
 
-  const rawRecords = getRecords();
+  let rawRecords = getRecords();
+  if (rawRecords.length === 0) {
+    console.log('本地暂无数据，立即触发首次数据抓取...');
+    await scrapeLatest();
+    rawRecords = getRecords();
+  }
   if (rawRecords.length === 0) {
     return res.status(500).json({ status: 'error', message: 'No records available.' });
   }
@@ -422,11 +450,13 @@ app.get('/api/analyze', async (req, res) => {
   const currentPeriod = rawRecords[0]?.period || '';
   let prediction = getCachedPrediction(currentPeriod);
   if (!prediction) {
-    try {
-      prediction = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
-      savePredictionCache(currentPeriod, prediction); const nextP = (parseInt(currentPeriod, 10)+1).toString(); if (nextP && prediction.predictedNumbers) { saveAIPredictionToHistory(nextP, prediction.predictedNumbers); }
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'AI 预测失败' });
+    prediction = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
+    if (prediction) {
+      savePredictionCache(currentPeriod, prediction);
+      const nextP = (parseInt(currentPeriod, 10)+1).toString();
+      if (nextP && prediction.predictedNumbers && prediction.isAIPowered) {
+        saveAIPredictionToHistory(nextP, prediction.predictedNumbers);
+      }
     }
   }
 
