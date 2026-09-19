@@ -48,12 +48,10 @@ function getCachedPrediction(currentPeriod: string) {
       const data = fs.readFileSync(cacheFilePath, 'utf8');
       const parsed = JSON.parse(data);
       if (parsed && parsed.period === currentPeriod) {
-        const triggerText = parsed.prediction?.reasoning?.triggerLocking || '';
-        const isPolluted = triggerText.includes('降级') || triggerText.includes('失败');
-        if (!isPolluted) {
+        if (parsed.prediction?.isAIPowered === true) {
           return parsed.prediction;
         } else {
-          console.warn('本地检测到包含降级或失败的脏缓存，予以清理...');
+          console.warn('本地检测到非真正的 AI 预测（高精度数理对冲运算保底），予以清理作废...');
           clearCachedPredictionFile();
         }
       }
@@ -443,12 +441,13 @@ app.get('/api/analyze', async (req, res) => {
     : [];
 
   const currentPeriod = rawRecords[0]?.period || '';
-  let prediction = getCachedPrediction(currentPeriod);
+  const forceAi = req.query.forceAi === 'true' || req.query.force === 'true';
+  let prediction = forceAi ? null : getCachedPrediction(currentPeriod);
   
-  // 如果没有缓存，或者缓存为非AI预测（本地保底），优先尝试调用真正的 Gemini AI 预测
-  if (!prediction || !prediction.isAIPowered) {
+  // 如果没有缓存，或者缓存为非AI预测（本地保底），或者请求强制AI，优先尝试调用真正的 Gemini AI 预测
+  if (!prediction || !prediction.isAIPowered || forceAi) {
     try {
-      console.log('检测到尚未生成真正的 Gemini AI 预测，正在请求 Gemini 3.8 Flash...');
+      console.log(`检测到需要生成真正的 Gemini AI 预测 (期号: ${currentPeriod}, forceAi: ${forceAi})，正在请求 Gemini 引擎...`);
       const aiPred = await getAIPrediction(rawRecords, analysis.triggers, lastPredictions);
       if (aiPred && aiPred.isAIPowered) {
         prediction = aiPred;
@@ -457,11 +456,10 @@ app.get('/api/analyze', async (req, res) => {
         if (nextP && prediction.predictedNumbers) {
           saveAIPredictionToHistory(nextP, prediction.predictedNumbers);
         }
+        console.log(`第 ${currentPeriod} 期 Gemini AI 预测推演成功并已永久存入缓存与历史库！`);
       } else if (!prediction) {
+        // 如果本次 AI 调用未成功，仅作为临时返回，绝不写入持久缓存
         prediction = aiPred;
-        if (prediction) {
-          savePredictionCache(currentPeriod, prediction);
-        }
       }
     } catch (e) {
       console.warn('AI prediction request failed, keeping fallback:', e);

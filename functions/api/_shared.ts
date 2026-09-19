@@ -65,40 +65,95 @@ export async function scrapeLatest(env: any) {
   }
 }
 
-async function generateContentWithRetry(ai: any, request: any, maxRetriesPerModel = 2) {
+async function generateContentWithRetry(apiKey: string, ai: any, prompt: string, baseUrl?: string) {
   const models = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of models) {
-    for (let i = 0; i < maxRetriesPerModel; i++) {
+    // 1. 优先尝试 @google/genai SDK 结构化推演
+    try {
+      console.log(`[Cloudflare Worker] 正在使用 ${model} 引擎进行预测推演...`);
+      const reqConfig = {
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              predictedNumbers: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+              reasoning: {
+                type: Type.OBJECT,
+                properties: { 
+                  triggerLocking: { type: Type.STRING }, 
+                  edgeDeduction: { type: Type.STRING }, 
+                  omissionConclusion: { type: Type.STRING } 
+                },
+                required: ['triggerLocking', 'edgeDeduction', 'omissionConclusion'],
+              },
+            },
+            required: ['predictedNumbers', 'reasoning'],
+          },
+        },
+      };
+
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Model ${model} 请求超时 (9s)`)), 9000)
+      );
+
+      const response = await Promise.race([
+        ai.models.generateContent(reqConfig),
+        timeoutPromise
+      ]) as any;
+
+      if (response && response.text) {
+        console.log(`[Cloudflare Worker] SDK 引擎 ${model} 成功响应！`);
+        return { text: response.text, usedModel: model };
+      }
+    } catch (sdkErr: any) {
+      console.warn(`[Cloudflare Worker] SDK ${model} 调用波动 (${sdkErr?.message || sdkErr})，尝试原生 REST Fetch 保障通路...`);
+      
+      // 2. 备用原生 REST Fetch（Edge Worker 原生运行时完全兼容）
       try {
-        console.log(`正在使用 ${model} 进行预测推演 (第 ${i + 1} 次尝试)...`);
-        const requestWithModel = { ...request, model };
-        const response = await ai.models.generateContent(requestWithModel);
-        if (response && response.text) {
-          return { response, usedModel: model };
-        }
-      } catch (err: any) {
-        lastError = err;
-        const msg = err.message || JSON.stringify(err);
-        const isUnavailable = err.status === 503 || err.status === 'UNAVAILABLE' || msg.includes('503') || msg.includes('high demand') || msg.includes('UNAVAILABLE');
+        const host = baseUrl || 'https://generativelanguage.googleapis.com';
+        const url = `${host}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 9000);
+        
+        const fetchRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: 'application/json',
+            },
+          }),
+        });
+        clearTimeout(timer);
 
-        console.warn(`模型 ${model} 遇到问题 (${msg})`);
-
-        if (i < maxRetriesPerModel - 1 && isUnavailable) {
-          const waitTime = (i + 1) * 1500;
-          console.warn(`检测到 Gemini 接口高负载，等待 ${waitTime}ms 后重试 ${model}...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+        if (fetchRes.ok) {
+          const fetchJson: any = await fetchRes.json();
+          const text = fetchJson.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            console.log(`[Cloudflare Worker] 原生 REST Fetch ${model} 成功响应！`);
+            return { text, usedModel: model };
+          }
         } else {
-          // 当前模型尝试完毕或非瞬态错误，准备切到下一个模型
-          console.warn(`模型 ${model} 本轮未成功，${models.indexOf(model) < models.length - 1 ? '自动回退至下一个备用模型...' : '所有候选模型已遍历完毕'}`);
-          break;
+          const errText = await fetchRes.text().catch(() => '');
+          console.warn(`[Cloudflare Worker] REST Fetch ${model} HTTP ${fetchRes.status}: ${errText.slice(0, 100)}`);
         }
+      } catch (fetchErr: any) {
+        lastError = fetchErr;
+        console.warn(`[Cloudflare Worker] REST Fetch ${model} 异常: ${fetchErr?.message || fetchErr}`);
       }
     }
   }
 
-  throw new Error(`AI 推理服务暂时不可用 (已尝试 ${models.join(', ')}): ${lastError?.message || '请稍候重试'}`);
+  throw lastError || new Error(`所有候选 Gemini 模型 (${models.join(', ')}) 均调用失败`);
 }
 
 export async function getAIPrediction(env: any, rawRecords: any[], triggers: any[], lastPredictions: number[]) {
@@ -107,8 +162,10 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
   const activeTargets = mathPredict.activeTargets;
   const activeNumbers = activeTargets.map((t: any) => t.number);
 
-  if (!env.GEMINI_API_KEY) {
-    console.warn('未配置 GEMINI_API_KEY，启用本地高精度精算算法');
+  const apiKey = env?.GEMINI_API_KEY || env?.GOOGLE_API_KEY || env?.GEMINI_KEY || env?.GOOGLE_GENAI_API_KEY || env?.VITE_GEMINI_API_KEY;
+
+  if (!apiKey) {
+    console.warn('未在 Cloudflare Pages 环境变量中检测到 GEMINI_API_KEY，启用本地高精度精算算法');
     return {
       ...mathPredict,
       isAIPowered: false,
@@ -118,7 +175,7 @@ export async function getAIPrediction(env: any, rawRecords: any[], triggers: any
 
   const baseUrl = env.GEMINI_BASE_URL || env.GOOGLE_GEMINI_BASE_URL;
   const ai = new GoogleGenAI({
-    apiKey: env.GEMINI_API_KEY,
+    apiKey: apiKey,
     ...(baseUrl ? { httpOptions: { baseUrl } } : {}),
   });
   const recordsText = rawRecords.slice(0, 49).map((r: any) => `${r.period}: [${r.numbers.join(',')}]`).join('\n');
@@ -187,8 +244,8 @@ ${recordsText}
   };
 
   try {
-    const { response, usedModel } = await generateContentWithRetry(ai, reqConfig);
-    const body = JSON.parse(response.text?.trim() || '{}');
+    const { text, usedModel } = await generateContentWithRetry(apiKey, ai, prompt, baseUrl);
+    const body = JSON.parse(text?.trim() || '{}');
     let predicted = (body.predictedNumbers || []).map((n: any) => parseInt(n, 10)).filter((n: number) => !isNaN(n) && n >= 1 && n <= 49);
     predicted = Array.from(new Set(predicted)).slice(0, 6);
     

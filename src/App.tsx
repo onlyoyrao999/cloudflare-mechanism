@@ -32,6 +32,43 @@ export default function App() {
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [generatingAi, setGeneratingAi] = useState<boolean>(false);
 
+  // 核心：自动监测与重试 AI 推演（如果检测到“高精度数理对冲运算”，自动重新调用 API 模型并写入 KV）
+  const [isRetryingAi, setIsRetryingAi] = useState<boolean>(false);
+  const [aiRetryAttempts, setAiRetryAttempts] = useState<number>(0);
+  const [aiNotification, setAiNotification] = useState<string | null>(null);
+
+  // 当发现“高精度数理对冲运算”（!prediction.isAIPowered）时，自动重新调用 API 模型，并在推演成功后持久化存入 KV
+  const requestAiPrediction = async (isAuto = false) => {
+    if (isRetryingAi) return;
+    setIsRetryingAi(true);
+    setAiNotification(isAuto ? '检测到数理保底，系统正在自动重新调用 Gemini AI 模型推演并存入 KV...' : '正在调用 Gemini AI 引擎重新推演并存入 KV...');
+
+    try {
+      const response = await fetch('/api/analyze?forceAi=true');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const rawData: AnalyzeAPIResponse = await response.json();
+      if (rawData && rawData.prediction) {
+        setData(rawData);
+        if (rawData.prediction.isAIPowered) {
+          setAiNotification('Gemini 3.8 Flash AI 推演完成，已成功持久化存入 Cloudflare KV！');
+          setTimeout(() => setAiNotification(null), 6000);
+          setAiRetryAttempts(0);
+        } else {
+          setAiNotification('AI 模型暂时繁忙，数秒后将自动重新发起调用...');
+          setAiRetryAttempts(prev => prev + 1);
+        }
+      }
+    } catch (err: any) {
+      console.warn('重新调用 AI 模型异常:', err);
+      setAiNotification('AI 接口连接重试中...');
+      setAiRetryAttempts(prev => prev + 1);
+    } finally {
+      setIsRetryingAi(false);
+    }
+  };
+
   // Fetch all analyzer data from our Express server API
   const fetchAnalysis = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -61,12 +98,24 @@ export default function App() {
     const initialize = async () => {
       setLoading(true);
       setError(null);
-      // Removed /api/refresh on initial load to prevent unnecessary requests
       await fetchAnalysis();
     };
 
     initialize();
   }, []);
+
+  // 关键核心业务钩子：如果界面检测到“高精度数理对冲运算”（!prediction.isAIPowered），自动重新调用 API 模型
+  useEffect(() => {
+    if (!data?.prediction) return;
+
+    if (!data.prediction.isAIPowered && aiRetryAttempts < 6 && !isRetryingAi) {
+      const delay = aiRetryAttempts === 0 ? 1500 : 5000;
+      const timer = setTimeout(() => {
+        requestAiPrediction(true);
+      }, delay);
+      return () => clearTimeout(timer);
+    }
+  }, [data?.prediction?.isAIPowered, aiRetryAttempts, isRetryingAi]);
 
   // Force scraping updates from targets
   const forceRefreshScraper = async () => {
@@ -385,14 +434,26 @@ export default function App() {
                     新一期极低概率（排除） 6 个号码
                   </h2>
                   {prediction.isAIPowered ? (
-                    <span className="text-[10.5px] bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-full font-medium flex items-center gap-1 shadow-sm">
+                    <span className="text-[10.5px] bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1.5 shadow-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
                       Gemini 3.8 Flash 智能预测
+                      <span className="text-[9.5px] text-indigo-400/80 font-mono">· 已存入KV</span>
                     </span>
                   ) : (
-                    <span className="text-[10.5px] bg-slate-950 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-medium">
-                      高精度数理对冲运算
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10.5px] bg-amber-500/15 border border-amber-500/40 text-amber-300 px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1">
+                        高精度数理对冲运算
+                      </span>
+                      <button
+                        onClick={() => requestAiPrediction(false)}
+                        disabled={isRetryingAi}
+                        className="text-[10.5px] bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/50 text-indigo-200 px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+                        title="如果显示高精度数理对冲运算，系统将自动重新调用 API 模型推演并存到 KV"
+                      >
+                        <RefreshCw className={`w-3 h-3 text-indigo-300 ${isRetryingAi ? 'animate-spin' : ''}`} />
+                        <span>{isRetryingAi ? 'AI 正在重新调用并存入 KV...' : '自动重调 AI 模型中 (点击立即执行)'}</span>
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -403,6 +464,31 @@ export default function App() {
                 </span>
               </div>
             </div>
+
+            {/* 自动检测到非 AI 时的状态提醒与落库反馈 */}
+            {!prediction.isAIPowered && (
+              <div className="mb-5 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs text-amber-200/90">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 text-amber-400 animate-pulse flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-amber-300 mr-1">正在自动重推：</span>
+                    检测到当前为数理保底，系统正自动重新调用 Gemini API 模型进行高维推演，推演成功后将立即存入 Cloudflare KV！
+                  </div>
+                </div>
+                {isRetryingAi && (
+                  <span className="font-mono text-[11px] text-amber-400 font-bold animate-pulse flex items-center gap-1.5 flex-shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                    推演中...
+                  </span>
+                )}
+              </div>
+            )}
+            {aiNotification && prediction.isAIPowered && (
+              <div className="mb-5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3.5 flex items-center gap-2.5 text-xs text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <span>{aiNotification}</span>
+              </div>
+            )}
 
             {/* THE 6 EXCLUDED BALLS */}
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
